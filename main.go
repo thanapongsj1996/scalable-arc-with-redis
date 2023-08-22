@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/labstack/echo/v4"
+	"github.com/patrickmn/go-cache"
 	"gorm.io/gorm"
 	"ks-redis/model"
 	"ks-redis/postgres"
@@ -36,11 +37,11 @@ func main() {
 
 	// Echo server
 	e := echo.New()
+	localMemCache := cache.New(3*time.Minute, 5*time.Second)
 
 	// Demo 1 - Load test
 	e.GET("/load-test", func(c echo.Context) error {
 		sleep10ms()
-		//sleep1000ms()
 		c.String(http.StatusOK, "ok")
 		return nil
 	})
@@ -124,6 +125,11 @@ func main() {
 
 		itemToCaches := map[string]interface{}{}
 
+		// Member cache hit
+		if membersJSON != nil {
+			fmt.Println("Member cache v2 hit")
+			json.Unmarshal([]byte(membersJSON.(string)), &members)
+		}
 		// Member cache miss
 		if membersJSON == nil {
 			fmt.Println("Member cache v2 miss")
@@ -132,22 +138,17 @@ func main() {
 			membersJSON, _ := json.Marshal(members)
 			itemToCaches[memberCacheKey] = membersJSON
 		}
-		// Member cache hit
-		if membersJSON != nil {
-			fmt.Println("Member cache v2 hit")
-			json.Unmarshal([]byte(membersJSON.(string)), &members)
-		}
 
+		// Count cache hit
+		if countStr != nil {
+			fmt.Println("Count cache v2 hit")
+			count, _ = strconv.Atoi(countStr.(string))
+		}
 		// Count cache miss
 		if countStr == nil {
 			fmt.Println("Count cache v2 miss")
 			count, err = queryCountAllMembersFromDatabase(db)
 			itemToCaches[countCacheKey] = count
-		}
-		// Count cache hit
-		if countStr != nil {
-			fmt.Println("Count cache v2 hit")
-			count, _ = strconv.Atoi(countStr.(string))
 		}
 
 		// Set cache using MSET
@@ -166,20 +167,112 @@ func main() {
 			"items":  members,
 		}
 
+		fmt.Println("---Done---")
 		c.JSON(http.StatusOK, resp)
 		return nil
 	})
 
-	// Demo 2 - Save to Redis
+	// Demo 2 - Call Redis using MGET,MSET and server memory cache
+	e.GET("/latest-members-redis-mem", func(c echo.Context) error {
+		cacheTimeout := 60 * 2 * time.Second
+
+		memberCacheKey := "members::latest"
+		countCacheKey := "members::count"
+
+		members := []*model.Member{}
+		count := -1
+
+		membersJSON, membersJSONFound := localMemCache.Get(memberCacheKey)
+		countInterface, countStrFound := localMemCache.Get(countCacheKey)
+
+		if membersJSONFound && countStrFound {
+			fmt.Println("Found local mem cache")
+			resp := map[string]interface{}{
+				"status": "ok",
+				"count":  countInterface,
+				"items":  membersJSON,
+			}
+
+			fmt.Println("---Done---")
+			c.JSON(http.StatusOK, resp)
+			return nil
+		}
+
+		fmt.Println("Not found local mem cache")
+
+		// Get cache using MGET
+		cacheItems, _ := rdb.MGet(ctx, memberCacheKey, countCacheKey).Result()
+		membersJSON = cacheItems[0]
+		countInterface = cacheItems[1]
+
+		itemsToRedisCache := map[string]interface{}{}
+		itemsToLocalMemCache := map[string]interface{}{}
+
+		// Member cache hit
+		if membersJSON != nil {
+			fmt.Println("Member cache redis hit")
+			json.Unmarshal([]byte(membersJSON.(string)), &members)
+			itemsToLocalMemCache[memberCacheKey] = membersJSON
+		}
+		// Member cache miss
+		if membersJSON == nil {
+			fmt.Println("Member cache redis miss")
+			members, err = queryLatestMembersFromDatabase(db)
+
+			membersJSON, _ := json.Marshal(members)
+			itemsToRedisCache[memberCacheKey] = membersJSON
+			itemsToLocalMemCache[memberCacheKey] = members
+		}
+
+		// Count cache hit
+		if countInterface != nil {
+			fmt.Println("Count cache redis hit")
+			count, _ = countInterface.(int)
+			itemsToLocalMemCache[countCacheKey] = count
+		}
+		// Count cache miss
+		if countInterface == nil {
+			fmt.Println("Count cache redis miss")
+			count, err = queryCountAllMembersFromDatabase(db)
+			itemsToRedisCache[countCacheKey] = count
+			itemsToLocalMemCache[countCacheKey] = count
+		}
+
+		// Set cache to Redis using MSET
+		if len(itemsToRedisCache) > 0 {
+			fmt.Println("Set cache to Redis using MSET")
+			rdb.MSet(ctx, itemsToRedisCache)
+			for key := range itemsToRedisCache {
+				rdb.Expire(ctx, key, cacheTimeout)
+				fmt.Println("Set Redis cache expire : ", key)
+			}
+		}
+
+		// Set cache to local memory
+		if len(itemsToLocalMemCache) > 0 {
+			fmt.Println("Set cache to local mem")
+			for key, value := range itemsToLocalMemCache {
+				localMemCache.Set(key, value, cache.DefaultExpiration)
+				fmt.Println("Set local mem cache : ", key)
+			}
+		}
+
+		resp := map[string]interface{}{
+			"status": "ok",
+			"count":  count,
+			"items":  members,
+		}
+
+		fmt.Println("---Done---")
+		c.JSON(http.StatusOK, resp)
+		return nil
+
+	})
 
 	e.Start(":8085")
 }
 func sleep10ms() {
 	time.Sleep(10 * time.Millisecond)
-}
-
-func sleep1000ms() {
-	time.Sleep(1000 * time.Millisecond)
 }
 
 func queryLatestMembersFromDatabase(db *gorm.DB) ([]*model.Member, error) {
