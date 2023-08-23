@@ -18,7 +18,7 @@ func Setup(db *gorm.DB) error {
 	}
 
 	// Seed member to table members
-	numberOfMembers := 10
+	numberOfMembers := 100000
 	members := make([]*model.Member, numberOfMembers)
 	for i := 0; i < numberOfMembers; i++ {
 		id := i
@@ -37,6 +37,6 @@ func Setup(db *gorm.DB) error {
 		members[i] = member
 	}
 
-	db.CreateInBatches(members, 2)
+	db.CreateInBatches(members, 1000)
 	return nil
 }
