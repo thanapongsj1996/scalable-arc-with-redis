@@ -14,6 +14,6 @@ demo-1-redis:
 demo-2-redis:
 	wrk -c50 -d10s http://localhost:8085/latest-members-redis-v2 --latency
 
-# Optimized with MGET, MSET and server memory cache
+# Optimized with MGET, MSET and Memory
 demo-2-mem-redis:
 	wrk -c50 -d10s http://localhost:8085/latest-members-redis-mem --latency

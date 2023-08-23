@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 	"ks-redis/model"
 	"ks-redis/postgres"
-	sRedis "ks-redis/redis"
+	"ks-redis/redis"
 	"ks-redis/setup"
 	"net/http"
 	"strconv"
@@ -25,7 +25,7 @@ func main() {
 	defer postgres.CloseDB()
 
 	// Init Redis
-	rdb := sRedis.InitRedis()
+	rdb := redis.InitRedis()
 	defer rdb.Close()
 
 	// Setup Database
@@ -172,7 +172,7 @@ func main() {
 		return nil
 	})
 
-	// Demo 2 - Call Redis using MGET,MSET and server memory cache
+	// Demo 3 - Call Redis using MGET,MSET and memory
 	e.GET("/latest-members-redis-mem", func(c echo.Context) error {
 		cacheTimeout := 60 * 2 * time.Second
 
