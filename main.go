@@ -39,9 +39,16 @@ func main() {
 	e := echo.New()
 	localMemCache := cache.New(3*time.Minute, 5*time.Second)
 
-	// Demo 1 - Load test
-	e.GET("/load-test", func(c echo.Context) error {
+	// Demo 0 - Load test 10ms
+	e.GET("/load-test-10ms", func(c echo.Context) error {
 		sleep10ms()
+		c.String(http.StatusOK, "ok")
+		return nil
+	})
+
+	// Demo 0 - Load test 300ms
+	e.GET("/load-test-300ms", func(c echo.Context) error {
+		sleep300ms()
 		c.String(http.StatusOK, "ok")
 		return nil
 	})
@@ -271,8 +278,12 @@ func main() {
 
 	e.Start(":8085")
 }
+
 func sleep10ms() {
 	time.Sleep(10 * time.Millisecond)
+}
+func sleep300ms() {
+	time.Sleep(300 * time.Millisecond)
 }
 
 func queryLatestMembersFromDatabase(db *gorm.DB) ([]*model.Member, error) {

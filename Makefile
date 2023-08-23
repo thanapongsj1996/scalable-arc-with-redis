@@ -1,6 +1,10 @@
-# Test load-test with wrk
-loadtest:
-	wrk -c50 -d10s http://localhost:8085/load-test --latency
+# Test load-test with wrk 10ms
+loadtest-10ms:
+	wrk -c50 -d10s http://localhost:8085/load-test-10ms --latency
+
+# Test load-test with wrk 300ms
+loadtest-500ms:
+	wrk -c50 -d10s http://localhost:8085/load-test-300ms --latency
 
 # Query from Database
 demo-1-db:
