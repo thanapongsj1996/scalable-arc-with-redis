@@ -1,8 +1,7 @@
 package model
 
 type Member struct {
-	ID            string
-	Username      string
-	RegisterOrder int
-	IsActive      int
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	IsActive int    `json:"is_active"`
 }

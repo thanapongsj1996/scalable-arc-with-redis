@@ -13,6 +13,7 @@ import (
 	"ks-redis/setup"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -42,15 +43,13 @@ func main() {
 	// Demo 0 - Load test 10ms
 	e.GET("/load-test-10ms", func(c echo.Context) error {
 		sleep10ms()
-		c.String(http.StatusOK, "ok")
-		return nil
+		return c.String(http.StatusOK, "ok")
 	})
 
 	// Demo 0 - Load test 300ms
 	e.GET("/load-test-300ms", func(c echo.Context) error {
 		sleep300ms()
-		c.String(http.StatusOK, "ok")
-		return nil
+		return c.String(http.StatusOK, "ok")
 	})
 
 	// Demo 1 - Call DB
@@ -175,8 +174,7 @@ func main() {
 		}
 
 		fmt.Println("---Done---")
-		c.JSON(http.StatusOK, resp)
-		return nil
+		return c.JSON(http.StatusOK, resp)
 	})
 
 	// Demo 3 - Call Redis using MGET,MSET and memory
@@ -201,8 +199,7 @@ func main() {
 			}
 
 			fmt.Println("---Done---")
-			c.JSON(http.StatusOK, resp)
-			return nil
+			return c.JSON(http.StatusOK, resp)
 		}
 
 		fmt.Println("Not found local mem cache")
@@ -271,10 +268,168 @@ func main() {
 		}
 
 		fmt.Println("---Done---")
-		c.JSON(http.StatusOK, resp)
-		return nil
+		return c.JSON(http.StatusOK, resp)
+	})
+
+	e.POST("/register", func(c echo.Context) error {
+		input := c.Request().Body
+		payload := map[string]interface{}{}
+
+		err := json.NewDecoder(input).Decode(&payload)
+		if err != nil {
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"status": "invalid input",
+				"error":  err.Error(),
+			})
+		}
+
+		id, ok := payload["id"].(string)
+		if !ok {
+			return c.JSON(http.StatusOK, map[string]interface{}{"status": "invalid input"})
+		}
+
+		duplicated, err := isDuplicatedUsername(db, id)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+				"status": "error",
+				"error":  err.Error(),
+			})
+		}
+
+		if duplicated {
+			return c.JSON(http.StatusOK, map[string]interface{}{"status": "duplicated"})
+		}
+
+		err = createMember(db, id)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+				"status": "error",
+				"error":  err.Error(),
+			})
+		}
+
+		resp := map[string]interface{}{
+			"status": "ok",
+		}
+
+		return c.JSON(http.StatusOK, resp)
+	})
+
+	e.POST("/register-redis", func(c echo.Context) error {
+		input := c.Request().Body
+		payload := map[string]interface{}{}
+
+		err := json.NewDecoder(input).Decode(&payload)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"status": "invalid input",
+				"error":  err.Error(),
+			})
+		}
+
+		id, ok := payload["id"].(string)
+		if !ok {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"status": "invalid input"})
+		}
+
+		duplicated, err := isDuplicatedUsernameInCache(rdb, id)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+				"status": "error",
+				"error":  err.Error(),
+			})
+		}
+
+		if duplicated {
+			return c.JSON(http.StatusOK, map[string]interface{}{"status": "duplicated"})
+		}
+
+		err = createMemberInCache(rdb, id)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+				"status": "error",
+				"error":  err.Error(),
+			})
+		}
+
+		resp := map[string]interface{}{
+			"status": "ok",
+		}
+
+		return c.JSON(http.StatusOK, resp)
+	})
+
+	buffer := map[string]interface{}{}
+	bufferMutex := sync.Mutex{}
+
+	e.POST("/register-buffer", func(c echo.Context) error {
+		input := c.Request().Body
+		payload := map[string]interface{}{}
+
+		err := json.NewDecoder(input).Decode(&payload)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{
+				"status": "invalid input",
+				"error":  err.Error(),
+			})
+		}
+
+		id, ok := payload["id"].(string)
+		if !ok {
+			return c.JSON(http.StatusBadRequest, map[string]interface{}{"status": "invalid input"})
+		}
+
+		bufferMutex.Lock()
+		buffer[id] = struct{}{}
+		bufferMutex.Unlock()
+
+		resp := map[string]interface{}{
+			"status": "ok",
+		}
+
+		return c.JSON(http.StatusOK, resp)
 
 	})
+	go func() {
+		t := time.NewTicker(time.Millisecond * 500)
+		for range t.C {
+
+			if len(buffer) == 0 {
+				continue
+			}
+
+			bufferMutex.Lock()
+
+			ids := []string{}
+			for id := range buffer {
+				ids = append(ids, id)
+			}
+
+			exists, err := isDuplicatedIdsInBatch(rdb, ids)
+			if err != nil {
+				fmt.Println("Error: ", err.Error())
+			}
+
+			registers := []string{}
+			for i, id := range ids {
+				exist := exists[i]
+				if !exist {
+					registers = append(registers, id)
+				}
+			}
+
+			if len(registers) > 0 {
+				err := createMemberInBatch(rdb, registers)
+				if err != nil {
+					fmt.Println("Error: ", err.Error())
+				}
+			}
+
+			// Clear buffer
+			buffer = map[string]interface{}{}
+			bufferMutex.Unlock()
+		}
+	}()
 
 	e.Start(":8085")
 }
@@ -304,4 +459,109 @@ func queryCountAllMembersFromDatabase(db *gorm.DB) (int, error) {
 	}
 
 	return int(count), nil
+}
+
+func isDuplicatedUsername(db *gorm.DB, id string) (bool, error) {
+	var members []*model.Member
+	err := db.Where("id = ?", "id_"+id).Find(&members).Error
+	if err != nil {
+		return false, err
+	}
+
+	return len(members) > 0, nil
+}
+func createMember(db *gorm.DB, id string) error {
+	member := &model.Member{
+		ID:       fmt.Sprintf("id_%s", id),
+		Username: fmt.Sprintf("user_%s", id),
+		IsActive: 1,
+	}
+
+	err := db.Create(member).Error
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func isDuplicatedUsernameInCache(rdb redis.IRedisClient, id string) (bool, error) {
+	username := "user_" + id
+	val, err := rdb.Exists(ctx, username).Result()
+	if err != nil {
+		return false, err
+	}
+
+	return val == 1, nil
+}
+func createMemberInCache(rdb redis.IRedisClient, id string) error {
+	username := fmt.Sprintf("user_%s", id)
+	member := &model.Member{
+		ID:       fmt.Sprintf("id_%s", id),
+		Username: username,
+		IsActive: 1,
+	}
+
+	jsonBytes, err := json.Marshal(member)
+	if err != nil {
+		return err
+	}
+
+	err = rdb.Set(ctx, username, jsonBytes, 0).Err()
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func isDuplicatedIdsInBatch(rdb redis.IRedisClient, ids []string) ([]bool, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	cacheKeys := make([]string, len(ids))
+	for i, id := range ids {
+		cacheKey := fmt.Sprintf("user_%s", id)
+		cacheKeys[i] = cacheKey
+	}
+
+	cacheItems, err := rdb.MGet(ctx, cacheKeys...).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	exists := make([]bool, len(cacheItems))
+	for i, val := range cacheItems {
+		exists[i] = val != nil
+	}
+
+	return exists, nil
+}
+func createMemberInBatch(rdb redis.IRedisClient, registerIds []string) error {
+	if len(registerIds) == 0 {
+		return nil
+	}
+
+	members := map[string]interface{}{}
+	for _, id := range registerIds {
+		member := &model.Member{
+			ID:       fmt.Sprintf("id_%s", id),
+			Username: fmt.Sprintf("user_%s", id),
+			IsActive: 1,
+		}
+
+		jsonBytes, err := json.Marshal(member)
+		if err != nil {
+			fmt.Println("Error: ", err.Error())
+		}
+		members[member.Username] = jsonBytes
+	}
+
+	err := rdb.MSet(ctx, members).Err()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

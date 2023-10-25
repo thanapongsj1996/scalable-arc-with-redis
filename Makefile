@@ -21,3 +21,18 @@ demo-2-redis:
 # Optimized with MGET, MSET and Memory
 demo-2-mem-redis:
 	wrk -c50 -d10s http://localhost:8085/latest-members-redis-mem --latency
+
+post-method:
+	wrk -c1 -t1 -d20s http://localhost:8085/latest-members-redis-v2  -s post.lua --latency
+
+gcp:
+	 wrk -c2 -t1 -d60s http://34.110.181.16/predict  -s post.lua --latency --timeout 120s
+
+register-db:
+	wrk -c100 -t1 -d10s http://localhost:8085/register  -s post.lua --latency
+
+register-redis:
+	wrk -c100 -t1 -d10s http://localhost:8085/register-redis  -s post.lua --latency
+
+register-buffer:
+	wrk -c100 -t1 -d10s http://localhost:8085/register-buffer  -s post.lua --latency

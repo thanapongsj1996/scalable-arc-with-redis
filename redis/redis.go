@@ -13,3 +13,5 @@ func InitRedis() *redis.Client {
 
 	return rdb
 }
+
+type IRedisClient = *redis.Client
