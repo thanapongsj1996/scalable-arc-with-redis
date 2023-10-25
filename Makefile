@@ -29,7 +29,7 @@ gcp:
 	 wrk -c2 -t1 -d60s http://34.110.181.16/predict  -s post.lua --latency --timeout 120s
 
 register-db:
-	wrk -c100 -t1 -d10s http://localhost:8085/register  -s post.lua --latency
+	wrk -c100 -t1 -d10s http://localhost:8085/register-db  -s post.lua --latency
 
 register-redis:
 	wrk -c100 -t1 -d10s http://localhost:8085/register-redis  -s post.lua --latency

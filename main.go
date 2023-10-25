@@ -271,7 +271,7 @@ func main() {
 		return c.JSON(http.StatusOK, resp)
 	})
 
-	e.POST("/register", func(c echo.Context) error {
+	e.POST("/register-db", func(c echo.Context) error {
 		input := c.Request().Body
 		payload := map[string]interface{}{}
 
