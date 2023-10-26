@@ -22,12 +22,6 @@ demo-2-redis:
 demo-2-mem-redis:
 	wrk -c50 -d10s http://localhost:8085/latest-members-redis-mem --latency
 
-post-method:
-	wrk -c1 -t1 -d20s http://localhost:8085/latest-members-redis-v2  -s post.lua --latency
-
-gcp:
-	 wrk -c2 -t1 -d60s http://34.110.181.16/predict  -s post.lua --latency --timeout 120s
-
 register-db:
 	wrk -c100 -t1 -d10s http://localhost:8085/register-db  -s post.lua --latency
 
